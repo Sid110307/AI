@@ -18,23 +18,16 @@
 $ git clone https://github.com/Sid110307/AI.git
 ```
 
-- Configure CMake
+- Enter the directory
 
 ```bash
 $ cd AI
-$ cmake -S . -B bin
 ```
 
-- Build the project
-
 ```bash
-$ cmake --build bin --target all -j4
-```
-
-- Run the project
-
-```bash
-$ ./bin/AI
+$ ./run.sh
+# Or
+PS> .\run.ps1
 ```
 
 ## License
