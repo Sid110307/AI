@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.2)
 project(AI)
 
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pthread -lre2")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pthread")
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(PROJECT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -10,8 +10,6 @@ set(PROJECT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};/usr/share/libtorch")
 add_executable(AI
         ${PROJECT_SOURCE_DIR}/AI.cpp
-        ${PROJECT_SOURCE_DIR}/threadPool.cpp
-        ${PROJECT_SOURCE_DIR}/include/threadPool.h
         ${PROJECT_SOURCE_DIR}/include/datasets.h
         ${PROJECT_SOURCE_DIR}/include/utils.h)
 

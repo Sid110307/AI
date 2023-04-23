@@ -24,6 +24,8 @@ $ git clone https://github.com/Sid110307/AI.git
 $ cd AI
 ```
 
+- Configure, build and run!
+
 ```bash
 $ ./run.sh
 # Or

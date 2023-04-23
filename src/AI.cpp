@@ -16,7 +16,7 @@ const int EPOCHS = 100;
 struct Chatbot : torch::nn::Module
 {
 public:
-	explicit Chatbot(int vocabSize, int embeddingDim = 50, int hiddenDim = 50)
+	explicit Chatbot(int vocabSize, int embeddingDim = 256, int hiddenDim = 512)
 	{
 		embedding = register_module("embedding", torch::nn::Embedding(vocabSize, embeddingDim));
 		lstm = register_module("lstm", torch::nn::LSTM(embeddingDim, hiddenDim));
@@ -25,11 +25,7 @@ public:
 
 	torch::Tensor forward(const torch::Tensor &input)
 	{
-		auto embedded = embedding->forward(input);
-		auto output = std::get<0>(lstm->forward(embedded));
-		auto decoded = fc->forward(output);
-
-		return decoded;
+		return fc->forward(std::get<0>(lstm->forward(embedding->forward(input))));
 	}
 
 private:
@@ -112,7 +108,7 @@ int main()
 			std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
 	start = printDebug("Creating training pairs of input-output sequences...");
 
-	std::vector<std::pair<std::vector<int>, int >> pairs;
+	std::vector<std::pair<std::vector<int>, int>> pairs;
 	for (const auto &conversation: encodedConversations)
 	{
 		for (int i = 1; i < (int) conversation.size(); i++)
@@ -128,24 +124,21 @@ int main()
 			std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
 	start = printDebug("Padding the input and output sequences to " + std::to_string(MAX_LENGTH) + " tokens...");
 
-	std::vector<std::pair<std::vector<int>, int >> paddedPairs;
+	std::vector<std::pair<std::vector<int>, int>> paddedPairs;
 	for (const auto &pair: pairs)
 	{
-		if (pair.first.size() <= MAX_LENGTH)
-		{
-			std::vector<int> inputSequence = pair.first;
-			inputSequence.insert(inputSequence.end(), MAX_LENGTH - inputSequence.size(), 0);
+		std::vector<int> inputSequence = pair.first;
+		int outputSequence = pair.second;
 
-			paddedPairs.emplace_back(inputSequence, pair.second);
-		}
+		while (inputSequence.size() < MAX_LENGTH) inputSequence.push_back(0);
+		paddedPairs.emplace_back(inputSequence, outputSequence);
 	}
 
 	printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
 			std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
 	start = printDebug("Creating the training and validation datasets...");
 
-	std::vector<std::pair<std::vector<int>, int >> trainingPairs;
-	std::vector<std::pair<std::vector<int>, int >> validationPairs;
+	std::vector<std::pair<std::vector<int>, int>> trainingPairs, validationPairs;
 
 	for (int i = 0; i < (int) paddedPairs.size(); i++)
 	{
@@ -157,10 +150,7 @@ int main()
 			std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
 	start = printDebug("Converting the pairs into PyTorch tensors...");
 
-	std::vector<torch::Tensor> trainingInputs;
-	std::vector<torch::Tensor> trainingTargets;
-	std::vector<torch::Tensor> validationInputs;
-	std::vector<torch::Tensor> validationTargets;
+	std::vector<torch::Tensor> trainingInputs, trainingTargets, validationInputs, validationTargets;
 
 	for (const auto &pair: trainingPairs)
 	{
@@ -176,14 +166,10 @@ int main()
 
 	printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
 			std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
-	start = printDebug("Initializing the chatbot model...");
+	start = printDebug("Defining the loss function and the optimizer...");
 
 	int vocabularySize = (int) wordToIndex.size();
 	auto* chatbot = new Chatbot(vocabularySize);
-
-	printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
-			std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
-	start = printDebug("Defining the loss function and the optimizer...");
 
 	torch::nn::CrossEntropyLoss loss;
 	torch::optim::Adam optimizer(chatbot->parameters(), torch::optim::AdamOptions(LEARNING_RATE));
@@ -195,23 +181,26 @@ int main()
 	std::cout << std::endl;
 	for (int epoch = 0; epoch < EPOCHS; epoch++)
 	{
-		torch::Tensor totalLoss = torch::zeros({1});
+		int correct = 0;
+		float totalLoss = 0.0f;
 
 		for (int i = 0; i < (int) trainingInputs.size(); i++)
 		{
-			optimizer.zero_grad();
+			torch::Tensor outputs = chatbot->forward(trainingInputs[i].view({-1, 1}));
+			torch::Tensor predicted = outputs.argmax(1);
 
-			torch::Tensor outputs = chatbot->forward(trainingInputs[i].view({-1, 1})).view(trainingTargets[i].sizes());
-			// FIXME: shape '[]' is invalid for input of size 3291760. Possibly trainingTargets is empty?
+			if (predicted.allclose(trainingTargets[i].view({-1}))) correct++;
+
 			torch::Tensor lossValue = loss(outputs, trainingTargets[i].view({-1}));
+			totalLoss += lossValue.item<float>();
 
+			optimizer.zero_grad();
 			lossValue.backward();
 			optimizer.step();
-
-			totalLoss += lossValue;
 		}
 
-		std::cout << "Epoch " << epoch + 1 << "/" << EPOCHS << " - Loss: " << totalLoss.item<float>() << std::endl;
+		std::cout << "\rEpoch " << epoch + 1 << "/" << EPOCHS << " - Loss: " << totalLoss << " - Accuracy: "
+				  << (float) correct / (float) trainingInputs.size() * 100.0f << "%\033[2K\r" << std::flush;
 	}
 
 	printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(

@@ -16,5 +16,6 @@
   the LSTM module (std::get<0>(lstm->forward(embedded))), we can use auto& to avoid the unnecessary copy.
 - Use at instead of [] for unordered map: If you're not sure whether a key exists in an unordered map, consider using at
   instead of [] to avoid creating a new element if the key is not found.
-- Additional dataset: https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/train_socratic.jsonl
+- Additional
+  dataset: https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/train_socratic.jsonl
 

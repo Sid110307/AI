@@ -11,7 +11,6 @@
 #include <curl/curl.h>
 #include <zip.h>
 
-#include "threadPool.h"
 #include "utils.h"
 
 const std::string DATASET_ROOT = std::filesystem::current_path().string() + "/" +
@@ -32,7 +31,7 @@ class CornellDataset : public Dataset
 public:
 	void validate() override
 	{
-		auto writeCallback = [](char* contents, size_t size, size_t nmemb, FILE* buffer)
+		auto writeCallback = [](char *contents, size_t size, size_t nmemb, FILE *buffer)
 		{
 			return fwrite(contents, size, nmemb, buffer);
 		};
@@ -45,12 +44,11 @@ public:
 		{
 			std::cout << "\nThe file " << DATASET_ROOT << "/movie_lines.txt could not be resolved. "
 					  << "Downloading from the Cornell Movie-Dialogs Corpus..." << std::endl;
-
-			CURL* curl = curl_easy_init();
+			CURL *curl = curl_easy_init();
 
 			if (curl)
 			{
-				FILE* file = fopen("./cornell_movie_dialogs_corpus.zip", "wb");
+				FILE *file = fopen("./cornell_movie_dialogs_corpus.zip", "wb");
 				curl_easy_setopt(curl, CURLOPT_URL,
 								 "https://www.cs.cornell.edu/~cristian/data/cornell_movie_dialogs_corpus.zip");
 				curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, false);
@@ -75,7 +73,7 @@ public:
 			}
 
 			std::cout << "Download complete. Extracting..." << std::endl;
-			struct zip* archive = zip_open("cornell_movie_dialogs_corpus.zip", 0, nullptr);
+			struct zip *archive = zip_open("cornell_movie_dialogs_corpus.zip", 0, nullptr);
 
 			if (archive)
 			{
@@ -88,7 +86,7 @@ public:
 					std::string name = stat.name;
 					if (name.find("movie_lines.txt") != std::string::npos)
 					{
-						struct zip_file* file = zip_fopen_index(archive, i, 0);
+						struct zip_file *file = zip_fopen_index(archive, i, 0);
 						if (file)
 						{
 							std::ofstream out(DATASET_ROOT + "/movie_lines.txt", std::ios::binary);
@@ -167,7 +165,8 @@ public:
 				{"n't",    " not"},
 				{"'bout",  "about"},
 				{"'til",   "until"},
-				{"'cause", "because"}
+				{"'cause", "because"},
+
 		};
 
 		auto preprocessLine = [&](const std::string &_line)
@@ -194,15 +193,8 @@ public:
 		}
 
 		std::vector<std::string> _lines;
+		for (const auto &line: conversations) _lines.push_back(preprocessLine(line));
 
-		ThreadPool pool;
-		for (const auto &line: conversations)
-		{
-			printDebug("Preprocessing the line: " + line, false);
-			pool.queueJob([&]() { _lines.push_back(preprocessLine(line)); });
-		}
-
-		pool.stop();
 		printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
 				std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
 
@@ -215,21 +207,23 @@ class GSMDataset : public Dataset
 public:
 	void validate() override
 	{
-		auto writeCallback = [](char* contents, size_t size, size_t nmemb, FILE* buffer)
+		auto writeCallback = [](char *contents, size_t size, size_t nmemb, FILE *buffer)
 		{
 			return fwrite(contents, size, nmemb, buffer);
 		};
 
 		std::chrono::high_resolution_clock::time_point start = printDebug(
 				"Checking if " + DATASET_ROOT + "/train_socratic.jsonl exists...");
+
 		if (!std::filesystem::exists(DATASET_ROOT + "/train_socratic.jsonl"))
 		{
 			std::cout << "The file " << DATASET_ROOT << "/train_socratic.jsonl does not exist. Downloading..."
 					  << std::endl;
-			CURL* curl = curl_easy_init();
+			CURL *curl = curl_easy_init();
+
 			if (curl)
 			{
-				FILE* file = fopen("./train_socratic.jsonl", "wb");
+				FILE *file = fopen("./train_socratic.jsonl", "wb");
 				curl_easy_setopt(curl, CURLOPT_URL,
 								 "https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/train_socratic.jsonl");
 				curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
@@ -297,15 +291,8 @@ public:
 		}
 
 		std::vector<std::string> _lines;
+		for (const auto &line: conversations) _lines.push_back(preprocessLine(line));
 
-		ThreadPool pool;
-		for (const auto &line: conversations)
-		{
-			printDebug("Preprocessing the line: " + line, false);
-			pool.queueJob([&]() { _lines.push_back(preprocessLine(line)); });
-		}
-
-		pool.stop();
 		printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
 				std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
 
