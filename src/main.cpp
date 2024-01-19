@@ -58,8 +58,7 @@ void testChatbot(const std::string &inputSequence, const std::map<std::string, i
     auto outputData = output.argmax(2).squeeze(0).data_ptr<int>();
     std::vector<int> outputIndices(outputData, outputData + output.size(1));
 
-    std::cout << "Input: " << inputSequence << std::endl;
-    std::cout << "Output: ";
+    std::cout << "Input: " << inputSequence << "\nOutput: ";
 
     for (const auto &index: outputIndices) std::cout << indexToWord.at(index) << " ";
     std::cout << std::endl;
@@ -116,15 +115,13 @@ int main()
 
     std::vector<std::pair<std::vector<int>, int>> pairs;
     for (const auto &conversation: encodedConversations)
-    {
-        for (int i = 1; i < static_cast<int>(conversation.size()); i++)
+        for (int i = 1; i < static_cast<int>(conversation.size()); ++i)
         {
             std::vector<int> inputSequence(conversation.begin(), conversation.begin() + i);
             int outputSequence = conversation[i];
 
             pairs.emplace_back(inputSequence, outputSequence);
         }
-    }
 
     printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
@@ -147,7 +144,7 @@ int main()
 
     std::vector<std::pair<std::vector<int>, int>> trainingPairs, validationPairs;
 
-    for (int i = 0; i < static_cast<int>(paddedPairs.size()); i++)
+    for (int i = 0; i < static_cast<int>(paddedPairs.size()); ++i)
     {
         if (i % 10 == 0) validationPairs.push_back(paddedPairs[i]);
         else trainingPairs.push_back(paddedPairs[i]);
@@ -186,12 +183,12 @@ int main()
     start = printDebug("Training the chatbot model...");
 
     std::cout << std::endl;
-    for (int epoch = 0; epoch < EPOCHS; epoch++)
+    for (int epoch = 0; epoch < EPOCHS; ++epoch)
     {
         int correct = 0;
         float totalLoss = 0.0f;
 
-        for (int i = 0; i < static_cast<int>(trainingInputs.size()); i++)
+        for (int i = 0; i < static_cast<int>(trainingInputs.size()); ++i)
         {
             torch::Tensor outputs = chatbot->forward(trainingInputs[i].view({-1, 1}));
             torch::Tensor predicted = outputs.argmax(1);
@@ -216,7 +213,7 @@ int main()
     start = printDebug("Evaluating the chatbot on the validation set...");
 
     int correct = 0;
-    for (int i = 0; i < static_cast<int>(validationInputs.size()); i++)
+    for (int i = 0; i < static_cast<int>(validationInputs.size()); ++i)
     {
         torch::Tensor outputs = chatbot->forward(validationInputs[i].view({-1, 1}));
         torch::Tensor predicted = outputs.argmax(1);
