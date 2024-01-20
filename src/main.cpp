@@ -1,28 +1,26 @@
 #include <iostream>
-#include <string>
-#include <torch/nn/modules/loss.h>
 #include <vector>
-#include <unordered_map>
+#include <string>
 #include <chrono>
+#include <unordered_map>
 
 #include <torch/torch.h>
 
 #include "include/datasets.h"
 #include "include/utils.h"
 
-constexpr int MAX_LENGTH = 50;
+constexpr int MAX_LENGTH = 20, EPOCHS = 1000, DIM = 256;
 constexpr double LEARNING_RATE = 0.1;
-constexpr int EPOCHS = 1000;
 
-struct Chatbot : torch::nn::Module
+struct AI : torch::nn::Module
 {
 public:
-    explicit Chatbot(int vocabularySize)
+    explicit AI(int vocabularySize)
     {
-        encoder = torch::nn::Embedding(torch::nn::EmbeddingOptions(vocabularySize, 256));
-        decoder = torch::nn::Embedding(torch::nn::EmbeddingOptions(vocabularySize, 256));
-        lstm = torch::nn::LSTM(torch::nn::LSTMOptions(256, 1024).num_layers(2));
-        linear = torch::nn::Linear(torch::nn::LinearOptions(1024, vocabularySize));
+        encoder = register_module("encoder", torch::nn::Embedding(torch::nn::EmbeddingOptions(vocabularySize, DIM)));
+        decoder = register_module("decoder", torch::nn::Embedding(torch::nn::EmbeddingOptions(vocabularySize, DIM)));
+        lstm = register_module("lstm", torch::nn::LSTM(torch::nn::LSTMOptions(DIM, MAX_LENGTH)));
+        linear = register_module("linear", torch::nn::Linear(torch::nn::LinearOptions(MAX_LENGTH, DIM)));
     }
 
     torch::Tensor forward(const torch::Tensor &inputSequence)
@@ -30,7 +28,7 @@ public:
         auto encoderOutput = encoder->forward(inputSequence);
         auto lstmOutput = lstm->forward(encoderOutput);
         auto decoderOutput = decoder->forward(inputSequence);
-        auto output = linear->forward(decoderOutput);
+        auto output = linear->forward(std::get<0>(lstmOutput).index({MAX_LENGTH - 1}));
 
         return output;
     }
@@ -41,10 +39,10 @@ private:
     torch::nn::Linear linear = nullptr;
 };
 
-void testChatbot(const std::string &inputSequence, const std::map<std::string, int> &wordToIndex,
-                 const std::map<int, std::string> &indexToWord, Chatbot &chatbot)
+void testModel(const std::string &inputSequence, const std::map<std::string, int> &wordToIndex,
+               const std::map<int, std::string> &indexToWord, AI &ai)
 {
-    auto start = printDebug("Testing the chatbot by passing it an input sequence...");
+    auto start = printDebug("Testing the model by passing it an input sequence...");
 
     std::vector<int> inputSequenceIndices;
     std::istringstream iss(inputSequence);
@@ -53,7 +51,7 @@ void testChatbot(const std::string &inputSequence, const std::map<std::string, i
     while (std::getline(iss, token, ' ')) inputSequenceIndices.push_back(wordToIndex.at(token));
 
     auto inputSequenceTensor = torch::tensor(inputSequenceIndices).unsqueeze(0);
-    auto output = chatbot.forward(inputSequenceTensor);
+    auto output = ai.forward(inputSequenceTensor);
 
     auto outputData = output.argmax(2).squeeze(0).data_ptr<int>();
     std::vector<int> outputIndices(outputData, outputData + output.size(1));
@@ -173,14 +171,14 @@ int main()
     start = printDebug("Defining the loss function and the optimizer...");
 
     int vocabularySize = static_cast<int>(wordToIndex.size());
-    auto* chatbot = new Chatbot(vocabularySize);
+    auto ai = std::make_shared<AI>(vocabularySize);
 
     torch::nn::CrossEntropyLoss loss;
-    torch::optim::Adam optimizer(chatbot->parameters(), torch::optim::AdamOptions(LEARNING_RATE));
+    torch::optim::Adam optimizer(ai->parameters(), torch::optim::AdamOptions(LEARNING_RATE));
 
     printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
-    start = printDebug("Training the chatbot model...");
+    start = printDebug("Training the AI model...");
 
     std::cout << std::endl;
     for (int epoch = 0; epoch < EPOCHS; ++epoch)
@@ -188,9 +186,9 @@ int main()
         int correct = 0;
         float totalLoss = 0.0f;
 
-        for (int i = 0; i < static_cast<int>(trainingInputs.size()); ++i)
+        for (int i = 0; i < static_cast<int>(trainingInputs.size()) - 1; ++i)
         {
-            torch::Tensor outputs = chatbot->forward(trainingInputs[i].view({-1, 1}));
+            torch::Tensor outputs = ai->forward(trainingInputs[i].view({-1, 1}));
             torch::Tensor predicted = outputs.argmax(1);
 
             if (predicted.allclose(trainingTargets[i].view({-1}))) correct++;
@@ -210,28 +208,30 @@ int main()
 
     printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
-    start = printDebug("Evaluating the chatbot on the validation set...");
+    start = printDebug("Evaluating the model on the validation set...");
 
     int correct = 0;
     for (int i = 0; i < static_cast<int>(validationInputs.size()); ++i)
     {
-        torch::Tensor outputs = chatbot->forward(validationInputs[i].view({-1, 1}));
+        torch::Tensor outputs = ai->forward(validationInputs[i].view({-1, 1}));
         torch::Tensor predicted = outputs.argmax(1);
 
         if (predicted.item<int>() == validationTargets[i].item<int>()) correct++;
     }
 
     std::cout << std::endl;
-    printDebug("Accuracy: " + std::to_string((float) correct / (float) validationInputs.size() * 100.0f) + "%", false);
+    printDebug("Accuracy: " +
+               std::to_string(static_cast<float>(correct) / static_cast<float>(validationInputs.size()) * 100.0f) + "%",
+               false);
 
     printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
-    start = printDebug("Saving the chatbot model...");
+    start = printDebug("Saving the model...");
 
-    // TODO: Save the chatbot model.
+    // TODO: Save the model.
     printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
 
-    testChatbot("how are you doing today", wordToIndex, indexToWord, *chatbot);
+    testModel("how are you doing today", wordToIndex, indexToWord, *ai);
     return EXIT_SUCCESS;
 }
