@@ -6,21 +6,21 @@
 
 - A compiler that supports C++20
 - CMake 3.20 or higher
-- [`libtorch`](https://pytorch.org/cppdocs/installing.html)
+- [`libtorch`](https://pytorch.org/cppdocs/installing.html) or [`torch`](https://pytorch.org/get-started/locally/)
 
 ## Usage
 
 - Clone the repository
 
 ```bash
-$ git clone https://github.com/Sid110307/AI.git
-$ cd AI
+git clone https://github.com/Sid110307/AI.git
+cd AI
 ```
 
 - Run the `run.sh` script
 
 ```bash
-$ ./run.sh
+./run.sh
 ```
 
 ## License

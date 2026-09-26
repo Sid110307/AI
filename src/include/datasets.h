@@ -79,9 +79,10 @@ public:
         for (const auto &line: lines)
         {
             auto parts = split(line, '$');
+            bool isMultiPart = parts[4].find("+++$+++") != std::string::npos;
             parts[4].erase(std::remove(parts[4].begin(), parts[4].end(), '+'), parts[4].end());
 
-            if (parts[4].find("+++$+++") != std::string::npos)
+            if (isMultiPart)
                 for (const auto &conversation: split(parts[4], '+'))conversations.push_back(conversation);
             else conversations.push_back(parts[4]);
         }

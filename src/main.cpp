@@ -1,4 +1,8 @@
+#include <algorithm>
+#include <filesystem>
 #include <iostream>
+#include <numeric>
+#include <random>
 #include <vector>
 #include <string>
 #include <chrono>
@@ -11,6 +15,9 @@
 
 constexpr int MAX_LENGTH = 20, EPOCHS = 1000, DIM = 256;
 constexpr double LEARNING_RATE = 0.1;
+constexpr unsigned int SEED = 42;
+
+const std::string MODEL_PATH = "model.pt";
 
 struct AI : torch::nn::Module
 {
@@ -18,23 +25,22 @@ public:
     explicit AI(int vocabularySize)
     {
         encoder = register_module("encoder", torch::nn::Embedding(torch::nn::EmbeddingOptions(vocabularySize, DIM)));
-        decoder = register_module("decoder", torch::nn::Embedding(torch::nn::EmbeddingOptions(vocabularySize, DIM)));
         lstm = register_module("lstm", torch::nn::LSTM(torch::nn::LSTMOptions(DIM, MAX_LENGTH)));
-        linear = register_module("linear", torch::nn::Linear(torch::nn::LinearOptions(MAX_LENGTH, DIM)));
+        linear = register_module("linear",
+                                  torch::nn::Linear(torch::nn::LinearOptions(MAX_LENGTH, vocabularySize)));
     }
 
     torch::Tensor forward(const torch::Tensor &inputSequence)
     {
         auto encoderOutput = encoder->forward(inputSequence);
         auto lstmOutput = lstm->forward(encoderOutput);
-        auto decoderOutput = decoder->forward(inputSequence);
-        auto output = linear->forward(std::get<0>(lstmOutput).index({MAX_LENGTH - 1}));
+        auto output = linear->forward(std::get<0>(lstmOutput).index({-1}));
 
         return output;
     }
 
 private:
-    torch::nn::Embedding encoder = nullptr, decoder = nullptr;
+    torch::nn::Embedding encoder = nullptr;
     torch::nn::LSTM lstm = nullptr;
     torch::nn::Linear linear = nullptr;
 };
@@ -44,22 +50,21 @@ void testModel(const std::string &inputSequence, const std::map<std::string, int
 {
     auto start = printDebug("Testing the model by passing it an input sequence...");
 
-    std::vector<int> inputSequenceIndices;
+    std::vector<int64_t> inputSequenceIndices;
     std::istringstream iss(inputSequence);
 
     std::string token;
-    while (std::getline(iss, token, ' ')) inputSequenceIndices.push_back(wordToIndex.at(token));
+    while (std::getline(iss, token, ' '))
+    {
+        auto it = wordToIndex.find(token);
+        inputSequenceIndices.push_back(it != wordToIndex.end() ? it->second : 0);
+    }
 
-    auto inputSequenceTensor = torch::tensor(inputSequenceIndices).unsqueeze(0);
+    auto inputSequenceTensor = torch::tensor(inputSequenceIndices, torch::kInt64).unsqueeze(1);
     auto output = ai.forward(inputSequenceTensor);
+    auto predictedIndex = static_cast<int>(output.argmax(1).item<int64_t>());
 
-    auto outputData = output.argmax(2).squeeze(0).data_ptr<int>();
-    std::vector<int> outputIndices(outputData, outputData + output.size(1));
-
-    std::cout << "Input: " << inputSequence << "\nOutput: ";
-
-    for (const auto &index: outputIndices) std::cout << indexToWord.at(index) << " ";
-    std::cout << std::endl;
+    std::cout << "Input: " << inputSequence << "\nOutput: " << indexToWord.at(predictedIndex) << std::endl;
 
     printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
@@ -67,6 +72,9 @@ void testModel(const std::string &inputSequence, const std::map<std::string, int
 
 int main()
 {
+    torch::manual_seed(SEED);
+    std::mt19937 rng(SEED);
+
     CornellDataset cornellDataset;
 
     std::vector<std::string> cleanedLines = cornellDataset.preprocess(cornellDataset.load());
@@ -178,36 +186,58 @@ int main()
 
     printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
-    start = printDebug("Training the AI model...");
 
-    std::cout << std::endl;
-    for (int epoch = 0; epoch < EPOCHS; ++epoch)
+    if (std::filesystem::exists(MODEL_PATH))
     {
-        int correct = 0;
-        float totalLoss = 0.0f;
+        start = printDebug("Loading the saved model from " + MODEL_PATH + "...");
+        torch::load(ai, MODEL_PATH);
+        printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
+    }
+    else
+    {
+        start = printDebug("Training the AI model...");
 
-        for (int i = 0; i < static_cast<int>(trainingInputs.size()) - 1; ++i)
+        std::vector<int> trainOrder(trainingInputs.size());
+        std::iota(trainOrder.begin(), trainOrder.end(), 0);
+
+        std::cout << std::endl;
+        for (int epoch = 0; epoch < EPOCHS; ++epoch)
         {
-            torch::Tensor outputs = ai->forward(trainingInputs[i].view({-1, 1}));
-            torch::Tensor predicted = outputs.argmax(1);
+            std::shuffle(trainOrder.begin(), trainOrder.end(), rng);
 
-            if (predicted.allclose(trainingTargets[i].view({-1}))) correct++;
+            int correct = 0;
+            float totalLoss = 0.0f;
 
-            torch::Tensor lossValue = loss(outputs, trainingTargets[i].view({-1}));
-            totalLoss += lossValue.item<float>();
+            for (const int i: trainOrder)
+            {
+                torch::Tensor outputs = ai->forward(trainingInputs[i].view({-1, 1}));
+                torch::Tensor predicted = outputs.argmax(1);
 
-            optimizer.zero_grad();
-            lossValue.backward();
-            optimizer.step();
+                if (predicted.allclose(trainingTargets[i].view({-1}))) correct++;
+
+                torch::Tensor lossValue = loss(outputs, trainingTargets[i].view({-1}));
+                totalLoss += lossValue.item<float>();
+
+                optimizer.zero_grad();
+                lossValue.backward();
+                optimizer.step();
+            }
+
+            std::cout << "\rEpoch " << epoch + 1 << "/" << EPOCHS << " - Loss: " << totalLoss << " - Accuracy: "
+                      << static_cast<float>(correct) / static_cast<float>(trainingInputs.size()) * 100.0f
+                      << "%\033[2K\r" << std::flush;
         }
 
-        std::cout << "\rEpoch " << epoch + 1 << "/" << EPOCHS << " - Loss: " << totalLoss << " - Accuracy: "
-                  << static_cast<float>(correct) / static_cast<float>(trainingInputs.size()) * 100.0f << "%\033[2K\r"
-                  << std::flush;
+        printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
+        start = printDebug("Saving the model to " + MODEL_PATH + "...");
+
+        torch::save(ai, MODEL_PATH);
+        printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
     }
 
-    printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
     start = printDebug("Evaluating the model on the validation set...");
 
     int correct = 0;
@@ -216,7 +246,7 @@ int main()
         torch::Tensor outputs = ai->forward(validationInputs[i].view({-1, 1}));
         torch::Tensor predicted = outputs.argmax(1);
 
-        if (predicted.item<int>() == validationTargets[i].item<int>()) correct++;
+        if (predicted.item<int64_t>() == validationTargets[i].item<int64_t>()) correct++;
     }
 
     std::cout << std::endl;
@@ -224,11 +254,6 @@ int main()
                std::to_string(static_cast<float>(correct) / static_cast<float>(validationInputs.size()) * 100.0f) + "%",
                false);
 
-    printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
-    start = printDebug("Saving the model...");
-
-    // TODO: Save the model.
     printDebug("Done in " + std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::high_resolution_clock::now() - start).count()) + "ms.", false);
 
